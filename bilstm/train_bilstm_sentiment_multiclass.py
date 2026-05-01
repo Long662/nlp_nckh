@@ -21,7 +21,7 @@ tf.random.set_seed(SEED)
 
 # ================== 1. Config ==================
 # Đổi path này nếu cần
-CSV_PATH = "/home/llm_ws/data/train/train.csv"
+CSV_PATH = os.path.join(os.path.dirname(__file__), "../data/train/train.csv")
 
 MAX_VOCAB     = 20000
 SEQ_LEN       = 64

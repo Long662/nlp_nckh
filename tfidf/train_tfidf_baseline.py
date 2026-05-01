@@ -1,4 +1,5 @@
 # train_tfidf_baseline.py
+import os
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, GridSearchCV
@@ -11,7 +12,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from joblib import dump
 
 # --------- Load data ----------
-df = pd.read_csv("/home/llm_ws/data/train/train.csv")
+df = pd.read_csv(os.path.join(os.path.dirname(__file__), "../data/train/train.csv"))
 df = df.dropna(subset=["text", "label"])
 
 # --------- Bỏ các class có quá ít mẫu (ví dụ < 10) ----------
