@@ -1,0 +1,16 @@
+{
+  "input_csv": "D:\\Documents\\HCMUT\\CaoHoc\\HK252\\AI\\BTL\\nlp_nckh\\data\\test\\test.csv",
+  "output_csv": "D:\\Documents\\HCMUT\\CaoHoc\\HK252\\AI\\BTL\\nlp_nckh\\data\\test\\test_predictions.csv",
+  "rows": 521,
+  "elapsed_time_s": 2961.567072,
+  "models": "both",
+  "llm_model": "qwen3:8b",
+  "phobert_module": "my_phobert_only",
+  "has_label": true,
+  "phobert_accuracy": 0.7562380038387716,
+  "llm_accuracy": 0.3416506717850288,
+  "phobert_mean_infer_time_s": 0.1531950690978887,
+  "llm_mean_infer_time_s": 5.202616992322456,
+  "phobert_error_count": 0,
+  "llm_error_count": 0
+}

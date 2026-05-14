@@ -28,7 +28,7 @@ Nhãn hợp lệ: very_positive, positive, neutral, negative, very_negative.
 Yêu cầu:
 - Đọc bình luận sản phẩm.
 - Chọn MỘT nhãn duy nhất thể hiện cảm xúc tổng thể.
-- CHỈ trả về đúng chuỗi nhãn, KHÔNG thêm bất kỳ văn bản nào khác.
+- Trả về đúng chuỗi nhãn, và giải thích nhanh vì sao chọn nhãn đó (1-2 câu).
 
 Nhãn trả về phải là MỘT TRONG:
 very_positive

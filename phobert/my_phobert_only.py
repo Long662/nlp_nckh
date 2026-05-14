@@ -25,7 +25,7 @@ from textproc import (
 # ===== Model dir autodetect (handles both of your paths) =====
 _DEF_CANDIDATES: List[str] = [
     os.environ.get("PHOBERT_MODEL_DIR", ""),                 # allow env override
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "phobert_5cls_clean"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "phobert_5cls_clean"),  # workspace root / phobert_5cls_clean
 ]
 MODEL_DIR_PHOBERT = next((p for p in _DEF_CANDIDATES if p and os.path.isdir(p)), "")
 
@@ -71,8 +71,9 @@ def _ensure():
                 MODEL_DIR_PHOBERT = p
                 break
     if not MODEL_DIR_PHOBERT or not os.path.isdir(MODEL_DIR_PHOBERT):
+        candidates_str = "\n  - ".join(str(p) for p in _DEF_CANDIDATES if p)
         raise FileNotFoundError(
-            "Checkpoint not found. Set PHOBERT_MODEL_DIR or create one of:\n  - /home/llm_ws/phobert/phobert_5cls_clean\n  - /home/llm_ws/phobert_5cls_clean"
+            f"Checkpoint not found. Set PHOBERT_MODEL_DIR or create one of:\n  - {candidates_str}"
         )
     # test_phobert.py uses use_fast=False; keep same for parity
     _tok = AutoTokenizer.from_pretrained(MODEL_DIR_PHOBERT, use_fast=False)

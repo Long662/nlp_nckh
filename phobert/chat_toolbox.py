@@ -25,7 +25,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QRunnable, QThreadPool, pyqtSignal, QObject, QThread, pyqtSignal, pyqtSlot
 import queue
 import time 
+import subprocess
 import requests
+from requests.exceptions import ReadTimeout
 import re
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -49,6 +51,32 @@ MODEL_COLOR = "#1565c0"
 INFO_COLOR  = "#2e7d32"
 ERROR_COLOR = "#c62828"
 TEXT_COLOR  = "#000000"
+
+# # ===== Auto-detect Ollama models =====
+# def _get_ollama_models() -> list:
+#     """
+#     Auto-detect models từ Ollama.
+#     Nếu detect thất bại, trả về danh sách mặc định.
+#     """
+#     try:
+#         result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
+#         if result.returncode == 0:
+#             lines = result.stdout.strip().split("\n")[1:]  # Skip header
+#             models = []
+#             for line in lines:
+#                 if line.strip():
+#                     model_name = line.split()[0]  # Lấy cột đầu tiên
+#                     if model_name:
+#                         models.append(model_name)
+#             if models:
+#                 return models
+#     except Exception as e:
+#         pass  # Fallback nếu lỗi
+    
+#     # Fallback: danh sách mặc định
+#     return ["qwen2.5:7b-instruct", "qwen3:8b", "qwen2.5:14b-instruct"]
+
+# OLLAMA_MODELS = _get_ollama_models()
 
 # -------------------------------
 # Dynamic model loader
@@ -227,8 +255,14 @@ class ChatWindow(QtWidgets.QMainWindow):
         llm_layout = QtWidgets.QHBoxLayout(self.llm_opts); llm_layout.setContentsMargins(0,0,0,0); llm_layout.setSpacing(6)
         self.lbl_llm_model = QtWidgets.QLabel("Model:")
         self.cmb_llm_model = QtWidgets.QComboBox(); self.cmb_llm_model.setEditable(True)
-        self.cmb_llm_model.addItems(["qwen3:8b","qwen2.5:7b-instruct","qwen2.5:14b-instruct"])
-        self.cmb_llm_model.setCurrentText("qwen3:8b"); self.cmb_llm_model.setMinimumWidth(180)
+        self.cmb_llm_model.addItems([
+            "qwen2.5:3b-instruct",
+            "llama3.2:3b",
+            "qwen2.5:7b-instruct",
+            "qwen3:8b",
+            "qwen2.5:14b-instruct",
+        ])
+        self.cmb_llm_model.setCurrentText("qwen2.5:3b-instruct"); self.cmb_llm_model.setMinimumWidth(180)
         self.lbl_llm_url = QtWidgets.QLabel("URL:")
         self.txt_llm_url = QtWidgets.QLineEdit("http://localhost:11434/api/generate")
         self.txt_llm_url.setMinimumWidth(260); self.txt_llm_url.setPlaceholderText("http://<host>:<port>/api/generate")
@@ -267,7 +301,9 @@ class ChatWindow(QtWidgets.QMainWindow):
 
         input_row = QtWidgets.QHBoxLayout()
         self.input = QtWidgets.QPlainTextEdit()
-        self.input.setPlaceholderText("Nhập tin nhắn… (Enter để gửi, Shift+Enter để xuống dòng)")
+        self.input.setAttribute(QtCore.Qt.WidgetAttribute.WA_InputMethodEnabled, True)
+        self.input.setInputMethodHints(QtCore.Qt.InputMethodHint.ImhNone)
+        self.input.setPlaceholderText("Nhập tin nhắn… (Ctrl+Enter để gửi)")
         self.input.installEventFilter(self)
         self.btn_send = QtWidgets.QPushButton("Send"); self.btn_send.setDefault(True)
         self.btn_send.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
@@ -285,6 +321,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         StackPn.setSpacing(5)
 
         self.link = QtWidgets.QLineEdit(); self.link.setReadOnly(False)
+        self.link.setAttribute(QtCore.Qt.WidgetAttribute.WA_InputMethodEnabled, True)
+        self.link.setInputMethodHints(QtCore.Qt.InputMethodHint.ImhNone)
         self.link.setPlaceholderText("Dán link sản phẩm vào đây…")
         self.link.setMaximumHeight(40)
         self.link.setMinimumHeight(30)
@@ -352,6 +390,27 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._append_block(f'<span style="color:{INFO_COLOR}; font-weight:600;">[Info]</span>', text)
     def append_error(self, text: str):
         self._append_block(f'<span style="color:{ERROR_COLOR}; font-weight:600;">[Error]</span>', text)
+
+    def _http_error_detail(self, response) -> str:
+        try:
+            data = response.json()
+            if isinstance(data, dict) and data.get("error"):
+                return str(data["error"])
+            return json.dumps(data, ensure_ascii=False)
+        except Exception:
+            return response.text.strip()
+
+    def _ollama_error_hint(self, detail: str, model: str) -> str:
+        text = f"{detail} {model}".lower()
+        if "exit code 2" in text or "out of memory" in text or "memory" in text:
+            return (
+                "\nGợi ý: runner Ollama có thể bị chết do thiếu RAM/VRAM. "
+                "Hãy dùng model nhỏ hơn như qwen2.5:3b-instruct hoặc llama3.2:3b; "
+                "qwen2.5:14b-instruct quá nặng cho cấu hình hiện tại."
+            )
+        if "not found" in text or "no such file" in text:
+            return "\nGợi ý: model chưa được pull hoặc tên model không đúng trong Ollama."
+        return ""
 
     # ---------- Helpers ----------
     def _canon_token(self, tok: str) -> str:
@@ -756,12 +815,32 @@ class ChatWindow(QtWidgets.QMainWindow):
         SYSTEM_PROMPT = (
             "Bạn là bộ phân loại cảm xúc bình luận sản phẩm tiếng Việt.\n"
             "Nhãn hợp lệ: very_positive, positive, neutral, negative, very_negative.\n\n"
-            "Nhiệm vụ:\n"
+            "Yêu cầu:\n"
             "- Đọc bình luận sản phẩm.\n"
             "- Chọn MỘT nhãn duy nhất thể hiện cảm xúc tổng thể.\n"
-            "- CHỈ trả về đúng MỘT từ trong các từ sau (không thêm bất kỳ chữ nào khác):\n"
+            "- Trả về đúng chuỗi nhãn, và giải thích nhanh vì sao chọn nhãn đó (1-2 câu).\n\n"
+            "Nhãn trả về phải là MỘT TRONG:\n"
             "very_positive\npositive\nneutral\nnegative\nvery_negative\n"
+            "\nĐịnh dạng trả về bắt buộc:\n"
+            "Nhãn: <một trong năm nhãn hợp lệ>\n"
+            "Giải thích: <1-2 câu ngắn>\n"
         )
+
+        def _extract_explanation(raw: str, label: str) -> str:
+            if not raw:
+                return ""
+
+            lines = [line.strip() for line in raw.splitlines() if line.strip()]
+            for line in lines:
+                m = re.match(r"^(?:giải\s*thích|explanation|reason)\s*[:：]\s*(.+)$", line, re.IGNORECASE | re.UNICODE)
+                if m:
+                    return m.group(1).strip()
+
+            cleaned = raw.strip()
+            cleaned = re.sub(r"^(?:nhãn|label)\s*[:：]\s*", "", cleaned, flags=re.IGNORECASE | re.UNICODE)
+            cleaned = re.sub(rf"(?<![a-z_]){re.escape(label)}(?![a-z_])", "", cleaned, count=1, flags=re.IGNORECASE)
+            cleaned = re.sub(r"^(?:giải\s*thích|explanation|reason)\s*[:：]\s*", "", cleaned.strip(), flags=re.IGNORECASE | re.UNICODE)
+            return cleaned.strip(" -:\n\t")
 
         def _runner(text: str) -> str:
             if requests is None:
@@ -773,22 +852,45 @@ class ChatWindow(QtWidgets.QMainWindow):
                 "model": model,
                 "prompt": prompt,
                 "stream": False,
-                # 👇 infer xong là unload model khỏi RAM/GPU
-                "keep_alive": 0,
+                "think": False,
+                # Keep the runner warm while the GUI is being used. Unloading after
+                # every request can make Ollama reload/crash more often on Windows.
+                "keep_alive": "5m",
                 "options": {
                     "temperature": 0,
                     "top_p": 1,
                     "seed": 42,
                     "num_ctx": 2048,
+                    "num_predict": 96,
                 },
             }
 
-            r = requests.post(url, json=payload, timeout=120)
-            r.raise_for_status()
+            try:
+                r = requests.post(url, json=payload, timeout=(10, 180))
+            except ReadTimeout as e:
+                raise RuntimeError(
+                    "Ollama đã load model nhưng sinh câu trả lời quá lâu.\n"
+                    f"Model: {model}\n"
+                    "Gợi ý: dùng model nhỏ hơn, đóng bớt ứng dụng để tăng RAM trống, "
+                    "hoặc giữ num_predict thấp cho bài toán phân loại."
+                ) from e
+            if not r.ok:
+                detail = self._http_error_detail(r)
+                hint = self._ollama_error_hint(detail, model)
+                raise RuntimeError(
+                    f"Ollama HTTP {r.status_code} tại {url}\n"
+                    f"Model: {model}\n"
+                    f"Chi tiết: {detail or r.reason}{hint}"
+                )
             out = r.json().get("response", "").strip()
 
             label = _extract_label(out)
-            return f"LLM label: {label}"
+            explanation = _extract_explanation(out, label)
+            # if explanation:
+            #     return f"LLM label: {label}\nExplanation: {explanation}\n\nRaw:\n{out}"
+            # return f"LLM label: {label}\n\nRaw:\n{out}"
+            return f"LLM label: {label}\nExplanation: {explanation}\n"
+
 
         return _runner
 
@@ -802,11 +904,12 @@ class ChatWindow(QtWidgets.QMainWindow):
     # ---------- Events ----------
     def eventFilter(self, obj, event):
         if obj is self.input and event.type() == QtCore.QEvent.Type.KeyPress:
-            key_event: QtGui.QKeyEvent = event  # type: ignore[assignment]
+            key_event: QtGui.QKeyEvent = event
             if key_event.key() in (QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
-                if key_event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier:
-                    return False
-                self.on_send(); return True
+                if key_event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
+                    self.on_send()
+                    return True
+                return False
         return super().eventFilter(obj, event)
 
     # ---------- Slots ----------
